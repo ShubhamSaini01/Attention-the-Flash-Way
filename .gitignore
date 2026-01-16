@@ -1,0 +1,12 @@
+build/
+*.o
+*.so
+*.a
+*.out
+*.ptx
+*.cubin
+*.log
+*.tmp
+.vscode/
+.idea/
+__pycache__/
