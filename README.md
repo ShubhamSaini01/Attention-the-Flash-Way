@@ -62,17 +62,9 @@ Benefits over v2:
 Requires PyTorch with CUDA support.
 
 ```bash
-# Build latest (v3)
-python setup_v3.py install
-
-# Run benchmark
-python benchmark_v3.py
-```
-
-To benchmark all stages including the broken ones:
-```bash
-python setup_v2.py install
-python benchmark_v2.py
+python setup.py install
+python benchmark.py            # Quick comparison at N=512
+python benchmark.py --scale    # Scaling test across N=256..16384
 ```
 
 ## Project structure
@@ -84,14 +76,22 @@ attention/
   attention_flash.cu          # Stage 3: fused flash attention v1 (broken thread mapping)
   attention_flash_v2.cu       # Stage 4: single-warp flash with warp shuffle
   attention_flash_v3.cu       # Stage 5: multi-row blocks, shared K/V tiles
-  attention_binding.cpp       # Bindings for stages 1-3
-  attention_binding_v2.cpp    # Bindings for stages 1-4
-  attention_binding_v3.cpp    # Bindings for stages 1, 4, 5
-benchmark.py                  # Benchmark stages 1-3
-benchmark_v2.py               # Benchmark stages 1-4
-benchmark_v3.py               # Benchmark stages 1, 4, 5
-setup.py / setup_v2.py / setup_v3.py
+  attention_binding.cpp       # PyBind11 bindings for all 5 stages
+benchmark.py                  # Latency + correctness benchmark vs PyTorch SDPA
+setup.py                      # PyTorch C++ extension build
+docs/presentation.html        # Full optimization journey with NVIDIA doc citations
 ```
+
+## Roadmap
+
+This is an ongoing exploration of GPU architecture, from first principles to hardware-specific exploitation:
+
+- [x] FP32 Flash Attention with online softmax
+- [x] Warp shuffle reductions, multi-row K/V tile sharing
+- [ ] FP16 path with Tensor Cores (`wmma` / `mma.sync`)
+- [ ] INT8 QK dot product via `dp4a` + FP32 softmax
+- [ ] Blackwell-specific optimizations (5th-gen Tensor Cores, custom MMA instructions)
+- [ ] Larger tile sizes, double buffering, software pipelining
 
 ## Key concepts
 
