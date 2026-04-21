@@ -11,6 +11,8 @@ setup(
                 "attention/attention_naive.cu",
                 "attention/attention_optimized.cu",
                 "attention/attention_flash.cu",
+                "attention/attention_flash_v2.cu",
+                "attention/attention_flash_v3.cu",
             ],
             extra_compile_args={
                 "cxx": ["-O3"],

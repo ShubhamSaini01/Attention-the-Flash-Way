@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attention the Flash Way — CUDA Kernel Optimization Journey</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d2e;
+    --accent: #6c63ff;
+    --accent2: #00c9a7;
+    --red: #ff6b6b;
+    --yellow: #ffd93d;
+    --text: #e4e4e7;
+    --muted: #9ca3af;
+    --border: #2d3148;
+    --code-bg: #13141f;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  /* Navigation */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    background: rgba(15, 17, 23, 0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 2rem;
+    display: flex;
+    gap: 1.5rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+  }
+  nav a {
+    color: var(--muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.2s;
+  }
+  nav a:hover { color: var(--accent); }
+
+  /* Slides */
+  .slide {
+    min-height: 100vh;
+    padding: 6rem 2rem 4rem;
+    max-width: 1000px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  h1 {
+    font-size: 2.8rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.5rem;
+  }
+  h2 {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.5rem;
+    display: inline-block;
+  }
+  h3 {
+    font-size: 1.2rem;
+    color: var(--accent2);
+    margin: 1.5rem 0 0.75rem;
+  }
+
+  .subtitle {
+    font-size: 1.3rem;
+    color: var(--muted);
+    margin-bottom: 2rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+  }
+
+  .card-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  /* Status badges */
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .badge-fail { background: rgba(255,107,107,0.15); color: var(--red); border: 1px solid rgba(255,107,107,0.3); }
+  .badge-pass { background: rgba(0,201,167,0.15); color: var(--accent2); border: 1px solid rgba(0,201,167,0.3); }
+  .badge-ref  { background: rgba(108,99,255,0.15); color: var(--accent); border: 1px solid rgba(108,99,255,0.3); }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  th {
+    background: var(--code-bg);
+    color: var(--accent);
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+    font-weight: 600;
+    border-bottom: 2px solid var(--accent);
+  }
+  td {
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+  }
+  tr:hover td { background: rgba(108,99,255,0.05); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', monospace; }
+  .highlight-row td { background: rgba(0,201,167,0.08); font-weight: 600; }
+  .fail-row td { background: rgba(255,107,107,0.06); }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    margin: 0.75rem 0;
+  }
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+  }
+  pre code { font-size: inherit; }
+  .inline-code {
+    background: var(--code-bg);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+
+  /* Syntax colors */
+  .kw { color: #c792ea; }
+  .fn { color: #82aaff; }
+  .cm { color: #546e7a; }
+  .str { color: #c3e88d; }
+  .num-lit { color: #f78c6c; }
+  .type { color: #ffcb6b; }
+  .bug { color: var(--red); font-weight: 700; }
+  .fix { color: var(--accent2); font-weight: 700; }
+
+  /* Callouts */
+  .callout {
+    border-left: 4px solid;
+    padding: 1rem 1.2rem;
+    border-radius: 0 8px 8px 0;
+    margin: 1rem 0;
+  }
+  .callout-red    { border-color: var(--red);    background: rgba(255,107,107,0.08); }
+  .callout-green  { border-color: var(--accent2); background: rgba(0,201,167,0.08); }
+  .callout-blue   { border-color: var(--accent);  background: rgba(108,99,255,0.08); }
+  .callout-yellow { border-color: var(--yellow);  background: rgba(255,217,61,0.08); }
+
+  /* Citation */
+  .cite {
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* Metric highlight */
+  .metric {
+    font-size: 2.5rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .metric-label {
+    font-size: 0.9rem;
+    color: var(--muted);
+    display: block;
+  }
+  .metric-green { color: var(--accent2); }
+  .metric-red { color: var(--red); }
+  .metric-blue { color: var(--accent); }
+
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin: 1.5rem 0;
+    text-align: center;
+  }
+
+  /* Arrow */
+  .arrow { color: var(--accent2); font-size: 1.5rem; margin: 0 0.5rem; }
+
+  /* Separator */
+  .sep { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .card-row { grid-template-columns: 1fr; }
+    .metric-row { grid-template-columns: 1fr; }
+    h1 { font-size: 2rem; }
+    .slide { padding: 5rem 1rem 3rem; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="#title">Intro</a>
+  <a href="#hardware">Hardware</a>
+  <a href="#naive">Naive</a>
+  <a href="#optimized">Optimized [FAIL]</a>
+  <a href="#flash-v1">Flash v1 [FAIL]</a>
+  <a href="#root-cause">Root Cause</a>
+  <a href="#flash-v2">Flash v2</a>
+  <a href="#flash-v3">Flash v3</a>
+  <a href="#results">Results</a>
+  <a href="#scaling">Scaling</a>
+  <a href="#memory">Memory</a>
+  <a href="#cuobjdump">cuobjdump</a>
+  <a href="#takeaways">Takeaways</a>
+  <a href="#refs">References</a>
+</nav>
+
+<!-- ============================================================ -->
+<!-- TITLE -->
+<!-- ============================================================ -->
+<section class="slide" id="title">
+  <h1>Attention the Flash Way</h1>
+  <p class="subtitle">Building a Flash Attention CUDA kernel from scratch &mdash; what worked, what failed, and why.</p>
+
+  <div class="card">
+    <p>Five kernel iterations. Three bugs found and diagnosed. One working Flash Attention kernel that beats a naive baseline at every sequence length and scales to N=16K+ on 12GB VRAM.</p>
+    <p>Every performance claim in this presentation is backed by benchmark data or <code class="inline-code">cuobjdump</code> output. CUDA specifications are cited to NVIDIA documentation.</p>
+  </div>
+
+  <div class="metric-row">
+    <div>
+      <span class="metric metric-green">0.77ms</span>
+      <span class="metric-label">Flash v3 median @ N=512</span>
+    </div>
+    <div>
+      <span class="metric metric-red">104ms</span>
+      <span class="metric-label">Flash v1 (broken) @ N=512</span>
+    </div>
+    <div>
+      <span class="metric metric-blue">135&times;</span>
+      <span class="metric-label">v1 &rarr; v3 speedup</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- HARDWARE -->
+<!-- ============================================================ -->
+<section class="slide" id="hardware">
+  <h2>Target Hardware</h2>
+
+  <div class="card">
+    <table>
+      <tr><td><strong>GPU</strong></td><td>NVIDIA RTX 5070</td></tr>
+      <tr><td><strong>Architecture</strong></td><td>Blackwell (Compute Capability 12.0)</td></tr>
+      <tr><td><strong>VRAM</strong></td><td>12 GB GDDR7</td></tr>
+      <tr><td><strong>Bandwidth</strong></td><td>672 GB/s</td></tr>
+      <tr><td><strong>CUDA Cores</strong></td><td>6,144</td></tr>
+      <tr><td><strong>SMs</strong></td><td>48</td></tr>
+      <tr><td><strong>FP32 TFLOPS</strong></td><td>30.9</td></tr>
+      <tr><td><strong>Shared Memory / SM</strong></td><td>100 KB</td></tr>
+      <tr><td><strong>L2 Cache</strong></td><td>48 MB</td></tr>
+      <tr><td><strong>Registers / SM</strong></td><td>65,536 &times; 32-bit</td></tr>
+      <tr><td><strong>Max Threads / Block</strong></td><td>1,024</td></tr>
+      <tr><td><strong>Warp Size</strong></td><td>32 threads</td></tr>
+    </table>
+  </div>
+
+  <div class="callout callout-blue">
+    <strong>Benchmark config:</strong> B=1, H=8, N=512, D=64 &mdash; 100 runs, 10 warmup, CUDA events timing.<br>
+    All kernels registered as PyTorch C++ extensions via PyBind11 and benchmarked against <code class="inline-code">torch.nn.functional.scaled_dot_product_attention</code>.
+  </div>
+
+  <p class="cite">Source: NVIDIA CUDA C++ Programming Guide &sect;H &mdash; Compute Capabilities; NVIDIA GeForce RTX 5070 specifications.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- STAGE 1: NAIVE -->
+<!-- ============================================================ -->
+<section class="slide" id="naive">
+  <h2>Stage 1 &mdash; Naive Attention <span class="badge badge-ref">BASELINE</span></h2>
+
+  <p>Three separate kernels, chained sequentially:</p>
+
+  <div class="card-row">
+    <div class="card">
+      <h3>Architecture</h3>
+      <ol style="padding-left: 1.2rem;">
+        <li><code class="inline-code">qk_kernel</code> &mdash; S = QK<sup>T</sup> / &radic;D, one (row, col) per thread</li>
+        <li><code class="inline-code">softmax_kernel</code> &mdash; serial per-row softmax</li>
+        <li><code class="inline-code">sv_kernel</code> &mdash; O = S &times; V</li>
+      </ol>
+      <p style="margin-top:1rem;">Materializes the full <strong>N&times;N score matrix</strong> in global memory.</p>
+    </div>
+    <div class="card">
+      <h3>Why it's fast at small N</h3>
+      <ul style="padding-left: 1.2rem;">
+        <li>Embarrassingly parallel &mdash; zero sync overhead</li>
+        <li>At N=512, score matrix = 8 MB (H=8) &mdash; fits in 48 MB L2</li>
+        <li>Simple memory access patterns &rarr; good coalescing</li>
+      </ul>
+    </div>
+  </div>
+
+  <pre><code><span class="cm">// qk_kernel: N threads per block, one dot product each</span>
+<span class="type">dim3</span> grid_qk(N, H, B);
+<span class="type">dim3</span> block_qk(<span class="bug">N</span>);  <span class="cm">// &larr; launches N threads per block</span>
+                   <span class="cm">//   CUDA max = 1024 &rarr; kernel fails silently for N &gt; 1024</span></code></pre>
+
+  <div class="callout callout-yellow">
+    <strong>Hard limit:</strong> The naive kernel launches N threads per block. CUDA caps blocks at 1,024 threads, so this kernel <strong>cannot run for sequence length N &gt; 1024</strong>.<br>
+    <span class="cite">Source: CUDA C++ Programming Guide &sect;H &mdash; "Maximum number of threads per block: 1024"</span>
+  </div>
+
+  <div class="metric-row">
+    <div>
+      <span class="metric metric-blue">1.344ms</span>
+      <span class="metric-label">Median latency @ N=512</span>
+    </div>
+    <div>
+      <span class="metric metric-blue">34 MB</span>
+      <span class="metric-label">Peak memory @ N=1024</span>
+    </div>
+    <div>
+      <span class="metric metric-blue">30</span>
+      <span class="metric-label">Registers / thread (cuobjdump)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- STAGE 2: OPTIMIZED (FAILED) -->
+<!-- ============================================================ -->
+<section class="slide" id="optimized">
+  <h2>Stage 2 &mdash; Optimized <span class="badge badge-fail">FAILED &mdash; 15&times; SLOWER</span></h2>
+
+  <p>Intended to improve naive with shared memory for K and parallel reduction for softmax. Actually <strong>15.2&times; slower</strong> than naive.</p>
+
+  <div class="metric-row">
+    <div>
+      <span class="metric metric-red">20.45ms</span>
+      <span class="metric-label">Median @ N=512 (vs 1.34ms naive)</span>
+    </div>
+    <div>
+      <span class="metric metric-red">255/256</span>
+      <span class="metric-label">Threads wasted per dot product</span>
+    </div>
+    <div>
+      <span class="metric metric-red">1,024</span>
+      <span class="metric-label">__syncthreads() calls per block</span>
+    </div>
+  </div>
+
+  <h3>The Bug</h3>
+
+  <pre><code><span class="cm">// qk_kernel_opt: BLOCK_SIZE=256 threads</span>
+<span class="kw">for</span> (<span class="type">int</span> col = <span class="num-lit">0</span>; col &lt; N; col++) {
+    <span class="cm">// All 256 threads cooperatively load K into shared memory</span>
+    <span class="kw">for</span> (<span class="type">int</span> d = threadIdx.x; d &lt; D; d += blockDim.x)
+        K_shared[d] = K[k_idx];
+    <span class="fn">__syncthreads</span>();
+
+    <span class="cm">// But then ALL 256 threads compute the SAME dot product...</span>
+    <span class="type">float</span> sum = <span class="num-lit">0.0f</span>;
+    <span class="kw">for</span> (<span class="type">int</span> d = <span class="num-lit">0</span>; d &lt; D; d++)
+        sum += Q[q_idx] * K_shared[d];  <span class="bug">// &larr; 255 threads do identical work</span>
+
+    <span class="kw">if</span> (threadIdx.x == <span class="num-lit">0</span>)  <span class="bug">// &larr; only thread 0 writes</span>
+        S[s_idx] = sum / sqrtf((<span class="type">float</span>)D);
+    <span class="fn">__syncthreads</span>();
+}</code></pre>
+
+  <div class="callout callout-red">
+    <strong>Root cause:</strong> All 256 threads independently compute the same dot product, but only thread 0 writes the result. 255 out of 256 threads do completely wasted arithmetic. The outer <code class="inline-code">for col</code> loop serializes N=512 columns with 2&times;N = 1,024 <code class="inline-code">__syncthreads()</code> barriers.
+  </div>
+
+  <p class="cite">Benchmark: 20.447ms median vs 1.344ms naive = 15.2&times; slower. Measured on RTX 5070, 100 runs.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- STAGE 3: FLASH v1 (FAILED) -->
+<!-- ============================================================ -->
+<section class="slide" id="flash-v1">
+  <h2>Stage 3 &mdash; Flash Attention v1 <span class="badge badge-fail">FAILED &mdash; 75&times; SLOWER</span></h2>
+
+  <p>Correct Flash Attention algorithm (online softmax, tiled K/V, register accumulator) but catastrophically wrong thread-to-work mapping.</p>
+
+  <div class="metric-row">
+    <div>
+      <span class="metric metric-red">104ms</span>
+      <span class="metric-label">Median @ N=512 (vs 1.34ms naive)</span>
+    </div>
+    <div>
+      <span class="metric metric-red">384B</span>
+      <span class="metric-label">Stack spill / thread (cuobjdump)</span>
+    </div>
+    <div>
+      <span class="metric metric-red">4&times;</span>
+      <span class="metric-label">Wasted thread compute</span>
+    </div>
+  </div>
+
+  <h3>Bug 1: Stack Spill from Oversized Per-Thread Arrays</h3>
+
+  <pre><code><span class="cm">// BLOCK_SIZE = 256 threads</span>
+<span class="type">float</span> <span class="bug">O_local[64]</span>;     <span class="cm">// 64 floats = 256 bytes per thread</span>
+<span class="type">float</span> <span class="bug">scores[TILE_SIZE]</span>; <span class="cm">// 32 floats = 128 bytes per thread</span>
+<span class="cm">// Total: 96 floats of per-thread arrays</span>
+<span class="cm">// Compiler cannot fit these in registers &rarr; spills to stack (local memory)</span></code></pre>
+
+  <div class="callout callout-red">
+    <strong>Evidence from cuobjdump:</strong><br><br>
+    <code>flash_attention_kernel:  REG:31  <strong style="color:var(--red)">STACK:384</strong>  SHARED:1024</code><br>
+    <code>flash_attention_v2_kernel: REG:32  <strong style="color:var(--accent2)">STACK:0</strong>    SHARED:1024</code><br><br>
+    The 384 bytes of stack spill per thread means every array access goes through L2 cache &rarr; DRAM instead of the register file. With 256 threads per block, that&rsquo;s <strong>98,304 bytes of local memory traffic per block</strong>.
+  </div>
+
+  <p class="cite">Source: NVIDIA Technical Blog &mdash; "How to Improve CUDA Kernel Performance with Shared Memory Register Spilling": "all register spills were placed in local memory, which resides off-chip in device global memory."</p>
+
+  <h3>Bug 2: All 256 Threads Compute Identical Results</h3>
+
+  <pre><code><span class="cm">// ALL 256 threads compute the same dot product for each (row, col) pair</span>
+<span class="kw">for</span> (<span class="type">int</span> d = <span class="num-lit">0</span>; d &lt; D; d++)
+    dot += Q_tile[d] * K_tile[col * D + d];  <span class="bug">// &larr; all threads do this</span>
+
+<span class="cm">// Only threads 0..63 write output (D=64, stride=BLOCK_SIZE=256)</span>
+<span class="kw">for</span> (<span class="type">int</span> d = tid; d &lt; D; d += blockDim.x)  <span class="bug">// &larr; threads 64-255 write nothing</span>
+    O[o_idx] = O_local[d] / sum_val;</code></pre>
+</section>
+
+<!-- ============================================================ -->
+<!-- ROOT CAUSE -->
+<!-- ============================================================ -->
+<section class="slide" id="root-cause">
+  <h2>Root Cause Analysis</h2>
+
+  <p>Both failed kernels share the same fundamental mistake: <strong>threads are not mapped to independent output dimensions</strong>.</p>
+
+  <div class="card-row">
+    <div class="card">
+      <h3 style="color: var(--red);">Broken pattern</h3>
+      <p>256 threads &rarr; each thread computes the <strong>full</strong> dot product (all D=64 dimensions) &rarr; only 1 or 64 threads write output.</p>
+      <ul style="padding-left: 1.2rem;">
+        <li>Wasted compute: 4&times; to 256&times;</li>
+        <li>Oversized per-thread arrays</li>
+        <li>Stack spill to local memory</li>
+        <li>Excessive sync barriers</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="color: var(--accent2);">Correct pattern</h3>
+      <p>32 threads &rarr; each thread owns D/32 = <strong>2 dimensions</strong> &rarr; cooperative dot product via warp shuffle &rarr; every thread writes its own output.</p>
+      <ul style="padding-left: 1.2rem;">
+        <li>Zero wasted compute</li>
+        <li>Scalar accumulators (2 floats/thread)</li>
+        <li>No stack spill</li>
+        <li><code class="inline-code">__syncwarp()</code> only (no block sync)</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="sep">
+
+  <h3>The key insight: warp shuffle as broadcast reduction</h3>
+
+  <pre><code><span class="cm">// Butterfly reduction via __shfl_xor_sync</span>
+<span class="cm">// After 5 rounds, ALL 32 threads hold the total sum.</span>
+<span class="cm">// Unlike __shfl_down (where only thread 0 gets the result),</span>
+<span class="cm">// __shfl_xor is symmetric: thread i exchanges with thread i^offset.</span>
+<span class="fn">__device__</span> <span class="fn">__forceinline__</span> <span class="type">float</span> <span class="fn">warp_reduce_sum</span>(<span class="type">float</span> val) {
+    <span class="kw">for</span> (<span class="type">int</span> offset = <span class="num-lit">16</span>; offset &gt; <span class="num-lit">0</span>; offset &gt;&gt;= <span class="num-lit">1</span>)
+        val += <span class="fn">__shfl_xor_sync</span>(<span class="num-lit">0xFFFFFFFF</span>, val, offset);
+    <span class="kw">return</span> val;  <span class="fix">// &larr; every thread has the full sum</span>
+}</code></pre>
+
+  <div class="callout callout-blue">
+    <strong>Why this works:</strong> <code class="inline-code">__shfl_xor_sync(mask, val, offset)</code> returns the value from lane <code class="inline-code">lane_id ^ offset</code>. Because XOR is symmetric (thread i reads from i^offset, and i^offset reads from i), after 5 rounds (offsets 16, 8, 4, 2, 1) all 32 threads converge to the same total sum. No shared memory needed.
+    <br><br>
+    <span class="cite">Source: NVIDIA Developer Blog &mdash; "Using CUDA Warp-Level Primitives" (2018); CUDA C++ Programming Guide &sect;B.15 &mdash; Warp Shuffle Functions.</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- STAGE 4: FLASH v2 -->
+<!-- ============================================================ -->
+<section class="slide" id="flash-v2">
+  <h2>Stage 4 &mdash; Flash v2 (Single Warp) <span class="badge badge-pass">40&times; FASTER THAN v1</span></h2>
+
+  <p>One warp (32 threads) per query row. Each thread owns D/32 = 2 output dimensions for the entire kernel lifetime.</p>
+
+  <div class="metric-row">
+    <div>
+      <span class="metric metric-green">2.58ms</span>
+      <span class="metric-label">Median @ N=512</span>
+    </div>
+    <div>
+      <span class="metric metric-green">40&times;</span>
+      <span class="metric-label">Faster than v1</span>
+    </div>
+    <div>
+      <span class="metric metric-green">0</span>
+      <span class="metric-label">Stack spill (cuobjdump)</span>
+    </div>
+  </div>
+
+  <h3>What changed</h3>
+
+  <div class="card">
+    <table>
+      <tr>
+        <th>Property</th>
+        <th>Flash v1 (broken)</th>
+        <th>Flash v2 (fixed)</th>
+      </tr>
+      <tr>
+        <td>Threads / block</td>
+        <td class="num">256</td>
+        <td class="num">32 (one warp)</td>
+      </tr>
+      <tr>
+        <td>Dims / thread</td>
+        <td class="num">64 (all, duplicated)</td>
+        <td class="num">2 (D/32, unique)</td>
+      </tr>
+      <tr>
+        <td>Dot product method</td>
+        <td>Each thread does full loop</td>
+        <td>Warp butterfly shuffle</td>
+      </tr>
+      <tr>
+        <td>O accumulator</td>
+        <td><code>float O_local[64]</code></td>
+        <td><code>float o_local[2]</code></td>
+      </tr>
+      <tr>
+        <td>Registers (cuobjdump)</td>
+        <td class="num">31</td>
+        <td class="num">32</td>
+      </tr>
+      <tr>
+        <td>Stack spill (cuobjdump)</td>
+        <td class="num" style="color:var(--red)">384 bytes</td>
+        <td class="num" style="color:var(--accent2)">0 bytes</td>
+      </tr>
+      <tr>
+        <td>Sync primitive</td>
+        <td><code>__syncthreads()</code></td>
+        <td><code>__syncwarp()</code></td>
+      </tr>
+    </table>
+  </div>
+
+  <h3>Online softmax &mdash; per-element, no scores array</h3>
+  <pre><code><span class="kw">for</span> (<span class="type">int</span> col = <span class="num-lit">0</span>; col &lt; tile_size; col++) {
+    <span class="type">float</span> score = <span class="fn">warp_reduce_sum</span>(partial) / sqrtf((<span class="type">float</span>)D);
+
+    <span class="type">float</span> new_max = <span class="fn">fmaxf</span>(row_max, score);
+    <span class="type">float</span> exp_old = <span class="fn">expf</span>(row_max - new_max);
+    <span class="type">float</span> exp_new = <span class="fn">expf</span>(score  - new_max);
+
+    o_local[i] *= exp_old;              <span class="cm">// rescale running accumulator</span>
+    row_sum = row_sum * exp_old + exp_new;
+    o_local[i] += exp_new * V_s[...];   <span class="cm">// accumulate weighted V</span>
+    row_max = new_max;
+}</code></pre>
+
+  <div class="callout callout-green">
+    <strong>Why 2.58ms &gt; naive 1.34ms:</strong> v2 uses only 32 threads per block. The GPU has 48 SMs &times; 2048 max threads/SM = 98,304 thread capacity, but v2 only launches 512&times;8&times;1 = 4,096 blocks &times; 32 = 131,072 threads. Low occupancy per SM (only 1 active warp per block) limits instruction-level parallelism and latency hiding.
+    <br><br>
+    <span class="cite">Source: CUDA C++ Programming Guide &sect;5.2 &mdash; "Maximize Utilization": occupancy is the ratio of active warps to maximum warps per SM.</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- STAGE 5: FLASH v3 -->
+<!-- ============================================================ -->
+<section class="slide" id="flash-v3">
+  <h2>Stage 5 &mdash; Flash v3 (Multi-Row) <span class="badge badge-pass">FASTEST CUSTOM KERNEL</span></h2>
+
+  <p>Packs <strong>4 warps into one block</strong>, each handling a different query row. The critical insight: all rows in the same (batch, head) share the same K and V.</p>
+
+  <div class="metric-row">
+    <div>
+      <span class="metric metric-green">0.77ms</span>
+      <span class="metric-label">Median @ N=512</span>
+    </div>
+    <div>
+      <span class="metric metric-green">1.75&times;</span>
+      <span class="metric-label">Faster than naive</span>
+    </div>
+    <div>
+      <span class="metric metric-green">3.4&times;</span>
+      <span class="metric-label">Faster than v2</span>
+    </div>
+  </div>
+
+  <h3>K/V tile sharing across warps</h3>
+
+  <div class="card">
+    <pre><code><span class="cm">// Grid: (N/4, H, B)  Block: 128 threads = 4 warps</span>
+<span class="cm">// Shared memory layout:</span>
+<span class="cm">//   Q_s: 4 &times; D floats  (each warp has its own Q row)</span>
+<span class="cm">//   K_s: TILE &times; D floats (SHARED across all 4 warps) &larr; key insight</span>
+<span class="cm">//   V_s: TILE &times; D floats (SHARED across all 4 warps)</span>
+
+<span class="cm">// ALL 128 threads cooperatively load K/V (coalesced)</span>
+<span class="kw">for</span> (<span class="type">int</span> i = tid; i &lt; tile_size * D; i += <span class="num-lit">128</span>) {
+    K_s[i] = K[kv_base + i];
+    V_s[i] = V[kv_base + i];
+}
+<span class="fn">__syncthreads</span>();  <span class="cm">// full block sync &mdash; all warps need K_s, V_s</span>
+
+<span class="cm">// Each warp independently processes its own query row</span>
+<span class="cm">// (warp shuffle for dot products, no cross-warp sync needed)</span></code></pre>
+  </div>
+
+  <h3>Why v3 is faster: three compounding benefits</h3>
+
+  <div class="card-row">
+    <div class="card">
+      <strong style="color:var(--accent2)">1. Amortized K/V bandwidth</strong>
+      <p>K/V tiles loaded once, reused by 4 warps = <strong>4&times; less global memory traffic</strong> for K/V reads.</p>
+    </div>
+    <div class="card">
+      <strong style="color:var(--accent2)">2. Higher occupancy</strong>
+      <p>128 threads/block vs 32 = <strong>4&times; more active threads per SM</strong>, better latency hiding.</p>
+    </div>
+  </div>
+  <div class="card">
+    <strong style="color:var(--accent2)">3. Faster tile loads</strong>
+    <p>128 threads cooperating on coalesced loads vs 32 = <strong>4&times; higher load throughput</strong>. Each thread loads tile_size&times;D/128 = 16 elements instead of 64.</p>
+  </div>
+
+  <h3>Shared memory budget</h3>
+
+  <div class="callout callout-blue">
+    <strong>Per-block shared memory:</strong> (4&times;64 + 2&times;32&times;64) &times; 4 = <strong>17,408 bytes</strong> (17 KB)<br>
+    RTX 5070 provides 100 KB shared memory per SM &rarr; up to <strong>5 blocks per SM</strong> from shared memory alone.<br>
+    Register limit: 40 regs/thread &times; 128 threads = 5,120 regs/block. 65,536 per SM &rarr; 12 blocks. <strong>Shared memory is the binding constraint at 5 blocks/SM.</strong>
+    <br><br>
+    <span class="cite">Source: CUDA C++ Programming Guide &sect;H &mdash; Compute Capabilities: 65,536 registers per SM; cuobjdump: Flash v3 = 40 REG.</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- RESULTS -->
+<!-- ============================================================ -->
+<section class="slide" id="results">
+  <h2>Results &mdash; N=512 Comparison</h2>
+
+  <div class="card">
+    <table>
+      <tr>
+        <th>Kernel</th>
+        <th class="num">Median (ms)</th>
+        <th class="num">vs Naive</th>
+        <th class="num">vs PyTorch</th>
+        <th class="num">Max Error</th>
+        <th>Status</th>
+      </tr>
+      <tr>
+        <td>PyTorch SDPA</td>
+        <td class="num">0.095</td>
+        <td class="num">0.07&times;</td>
+        <td class="num">1.0&times;</td>
+        <td class="num">&mdash;</td>
+        <td><span class="badge badge-ref">REF</span></td>
+      </tr>
+      <tr class="highlight-row">
+        <td>Flash v3 (4-warp)</td>
+        <td class="num">0.766</td>
+        <td class="num">0.57&times;</td>
+        <td class="num">8.1&times;</td>
+        <td class="num">1e-6</td>
+        <td><span class="badge badge-pass">BEST</span></td>
+      </tr>
+      <tr>
+        <td>Naive</td>
+        <td class="num">1.344</td>
+        <td class="num">1.0&times;</td>
+        <td class="num">14.1&times;</td>
+        <td class="num">1e-6</td>
+        <td><span class="badge badge-ref">BASELINE</span></td>
+      </tr>
+      <tr>
+        <td>Flash v2 (1-warp)</td>
+        <td class="num">2.579</td>
+        <td class="num">1.92&times;</td>
+        <td class="num">27.1&times;</td>
+        <td class="num">1e-6</td>
+        <td><span class="badge badge-pass">PASS</span></td>
+      </tr>
+      <tr class="fail-row">
+        <td>Optimized</td>
+        <td class="num">20.447</td>
+        <td class="num">15.2&times;</td>
+        <td class="num">215&times;</td>
+        <td class="num">1e-6</td>
+        <td><span class="badge badge-fail">BROKEN</span></td>
+      </tr>
+      <tr class="fail-row">
+        <td>Flash v1</td>
+        <td class="num">104.396</td>
+        <td class="num">77.7&times;</td>
+        <td class="num">1,099&times;</td>
+        <td class="num">1e-6</td>
+        <td><span class="badge badge-fail">BROKEN</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="callout callout-blue">
+    <strong>The 8&times; gap to PyTorch SDPA</strong> is not algorithmic &mdash; it is hardware. PyTorch&rsquo;s SDPA dispatches to cuDNN&rsquo;s Flash Attention, which runs in <strong>FP16 on 5th-gen Tensor Cores</strong>. Tensor Cores deliver 4&ndash;8&times; higher throughput than FP32 CUDA cores, and FP16 halves memory bandwidth. Our kernel uses FP32 CUDA cores only.
+  </div>
+
+  <p class="cite">All timings: RTX 5070, B=1, H=8, N=512, D=64, 100 runs, CUDA event timing. Correctness: max absolute error vs PyTorch SDPA.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- SCALING -->
+<!-- ============================================================ -->
+<section class="slide" id="scaling">
+  <h2>Scaling with Sequence Length</h2>
+
+  <p>Benchmark across sequence length N = 256 to 16,384. Naive stops at N=1024 (thread limit). Flash scales to N=16K+ on 12 GB.</p>
+
+  <div class="card">
+    <table>
+      <tr>
+        <th class="num">N</th>
+        <th>Kernel</th>
+        <th class="num">Median (ms)</th>
+        <th class="num">Min (ms)</th>
+        <th class="num">Peak (MB)</th>
+        <th>Correct</th>
+      </tr>
+
+      <tr>
+        <td class="num" rowspan="4"><strong>256</strong></td>
+        <td>PyTorch SDPA</td><td class="num">0.036</td><td class="num">0.034</td><td class="num">0.5</td><td>ref</td>
+      </tr>
+      <tr><td>Naive</td><td class="num">0.344</td><td class="num">0.342</td><td class="num">2.5</td><td>yes</td></tr>
+      <tr><td>Flash v2</td><td class="num">0.658</td><td class="num">0.654</td><td class="num">0.5</td><td>yes</td></tr>
+      <tr class="highlight-row"><td>Flash v3</td><td class="num">0.230</td><td class="num">0.227</td><td class="num">0.5</td><td>yes</td></tr>
+
+      <tr><td colspan="6" style="border:none; height:4px;"></td></tr>
+
+      <tr>
+        <td class="num" rowspan="4"><strong>512</strong></td>
+        <td>PyTorch SDPA</td><td class="num">0.095</td><td class="num">0.089</td><td class="num">1.0</td><td>ref</td>
+      </tr>
+      <tr><td>Naive</td><td class="num">1.345</td><td class="num">1.340</td><td class="num">9.0</td><td>yes</td></tr>
+      <tr><td>Flash v2</td><td class="num">2.577</td><td class="num">2.570</td><td class="num">1.0</td><td>yes</td></tr>
+      <tr class="highlight-row"><td>Flash v3</td><td class="num">0.766</td><td class="num">0.762</td><td class="num">1.0</td><td>yes</td></tr>
+
+      <tr><td colspan="6" style="border:none; height:4px;"></td></tr>
+
+      <tr>
+        <td class="num" rowspan="4"><strong>1024</strong></td>
+        <td>PyTorch SDPA</td><td class="num">0.264</td><td class="num">0.257</td><td class="num">2.0</td><td>ref</td>
+      </tr>
+      <tr><td>Naive</td><td class="num">5.513</td><td class="num">5.502</td><td class="num">34.0</td><td>yes</td></tr>
+      <tr><td>Flash v2</td><td class="num">10.114</td><td class="num">10.007</td><td class="num">2.0</td><td>yes</td></tr>
+      <tr class="highlight-row"><td>Flash v3</td><td class="num">2.778</td><td class="num">2.763</td><td class="num">2.0</td><td>yes</td></tr>
+
+      <tr><td colspan="6" style="border:none; height:4px;"></td></tr>
+
+      <tr>
+        <td class="num" rowspan="4"><strong>2048</strong></td>
+        <td>PyTorch SDPA</td><td class="num">0.980</td><td class="num">0.973</td><td class="num">4.0</td><td>ref</td>
+      </tr>
+      <tr class="fail-row"><td>Naive</td><td class="num" colspan="3" style="color:var(--red)">Kernel launch fails &mdash; seq len N &gt; 1024 exceeds CUDA threads/block limit</td><td style="color:var(--muted)">128 MB*</td></tr>
+      <tr><td>Flash v2</td><td class="num">40.283</td><td class="num">39.583</td><td class="num">4.0</td><td>yes</td></tr>
+      <tr class="highlight-row"><td>Flash v3</td><td class="num">11.127</td><td class="num">11.031</td><td class="num">4.0</td><td>yes</td></tr>
+
+      <tr><td colspan="6" style="border:none; height:4px;"></td></tr>
+
+      <tr>
+        <td class="num" rowspan="4"><strong>4096</strong></td>
+        <td>PyTorch SDPA</td><td class="num">3.579</td><td class="num">3.570</td><td class="num">8.0</td><td>ref</td>
+      </tr>
+      <tr class="fail-row"><td>Naive</td><td class="num" colspan="3" style="color:var(--red)">Kernel launch fails &mdash; seq len N exceeds 1024 thread limit</td><td style="color:var(--muted)">512 MB*</td></tr>
+      <tr><td>Flash v2</td><td class="num">161.716</td><td class="num">158.382</td><td class="num">8.0</td><td>yes</td></tr>
+      <tr class="highlight-row"><td>Flash v3</td><td class="num">44.575</td><td class="num">43.538</td><td class="num">8.0</td><td>yes</td></tr>
+
+      <tr><td colspan="6" style="border:none; height:4px;"></td></tr>
+
+      <tr>
+        <td class="num" rowspan="4"><strong>8192</strong></td>
+        <td>PyTorch SDPA</td><td class="num">14.698</td><td class="num">14.216</td><td class="num">16.0</td><td>ref</td>
+      </tr>
+      <tr class="fail-row"><td>Naive</td><td class="num" colspan="3" style="color:var(--red)">Kernel launch fails &mdash; seq len N exceeds 1024 thread limit</td><td style="color:var(--muted)">2,048 MB*</td></tr>
+      <tr><td>Flash v2</td><td class="num">642.568</td><td class="num">639.339</td><td class="num">16.0</td><td>yes</td></tr>
+      <tr class="highlight-row"><td>Flash v3</td><td class="num">177.485</td><td class="num">173.906</td><td class="num">16.0</td><td>yes</td></tr>
+
+      <tr><td colspan="6" style="border:none; height:4px;"></td></tr>
+
+      <tr>
+        <td class="num" rowspan="3"><strong>16384</strong></td>
+        <td>PyTorch SDPA</td><td class="num">56.860</td><td class="num">55.613</td><td class="num">32.0</td><td>ref</td>
+      </tr>
+      <tr class="fail-row"><td>Naive</td><td class="num" colspan="3" style="color:var(--red)">Kernel launch fails &mdash; seq len N exceeds 1024 thread limit</td><td style="color:var(--muted)">8,192 MB*</td></tr>
+      <tr class="highlight-row"><td>Flash v3</td><td class="num" colspan="2" style="color:var(--muted)">(in range &mdash; see memory slide)</td><td class="num">32.0</td><td>yes</td></tr>
+    </table>
+  </div>
+
+  <p class="cite">* Naive fails at sequence length N &gt; 1024 because it launches N threads per block, exceeding the CUDA hardware limit of 1,024 threads/block. This is a kernel design bug, not a memory issue. However, even with a fixed kernel that tiles columns across blocks, naive would hit a <strong>memory wall</strong>: the N&times;N score matrix (B&times;H&times;N&times;N&times;4 bytes) reaches 8 GB at sequence length N=16384 &mdash; consuming 67% of the RTX 5070&rsquo;s 12 GB VRAM before Q/K/V are even allocated.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- MEMORY -->
+<!-- ============================================================ -->
+<section class="slide" id="memory">
+  <h2>Memory Scaling: O(N&sup2;) vs O(N&times;D)</h2>
+
+  <p>Flash Attention&rsquo;s core advantage: it never materializes the N&times;N attention matrix.</p>
+
+  <div class="card">
+    <table>
+      <tr>
+        <th class="num">N</th>
+        <th class="num">Flash v3 Peak (MB)</th>
+        <th class="num">Naive Score Matrix (MB)</th>
+        <th class="num">Ratio</th>
+      </tr>
+      <tr><td class="num">256</td><td class="num">0.5</td><td class="num">2</td><td class="num">4&times;</td></tr>
+      <tr><td class="num">512</td><td class="num">1.0</td><td class="num">8</td><td class="num">8&times;</td></tr>
+      <tr><td class="num">1,024</td><td class="num">2.0</td><td class="num">32</td><td class="num">16&times;</td></tr>
+      <tr><td class="num">2,048</td><td class="num">4.0</td><td class="num">128</td><td class="num">32&times;</td></tr>
+      <tr><td class="num">4,096</td><td class="num">8.0</td><td class="num">512</td><td class="num">64&times;</td></tr>
+      <tr><td class="num">8,192</td><td class="num">16.0</td><td class="num">2,048</td><td class="num">128&times;</td></tr>
+      <tr style="color: var(--red);">
+        <td class="num">16,384</td><td class="num">32.0</td><td class="num">8,192</td><td class="num">256&times;</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="callout callout-green">
+    <strong>Flash v3 memory = O(B &times; H &times; N &times; D)</strong> &mdash; just Q, K, V, and O tensors. The intermediate computation uses only shared memory (17 KB/block) and registers.<br><br>
+    <strong>Naive memory = O(B &times; H &times; N &times; N)</strong> &mdash; the full score matrix grows quadratically. At N=16,384 with H=8, the score matrix alone is <strong>8 GB</strong>, consuming 67% of the RTX 5070&rsquo;s 12 GB VRAM before any Q/K/V allocation.<br><br>
+    Flash v3 processes the same sequence at N=16,384 using only <strong>32 MB</strong> of peak memory.
+  </div>
+
+  <p class="cite">Flash v3 peak memory: measured via torch.cuda.max_memory_allocated(). Naive score matrix: computed as B&times;H&times;N&times;N&times;4 bytes.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- CUOBJDUMP -->
+<!-- ============================================================ -->
+<section class="slide" id="cuobjdump">
+  <h2>cuobjdump Evidence</h2>
+
+  <p>Raw resource usage from compiled <code class="inline-code">.so</code> binaries, extracted via <code class="inline-code">cuobjdump --dump-resource-usage</code>.</p>
+
+  <div class="card">
+    <table>
+      <tr>
+        <th>Kernel</th>
+        <th class="num">REG</th>
+        <th class="num">STACK</th>
+        <th class="num">SHARED</th>
+        <th class="num">LOCAL</th>
+        <th>Notes</th>
+      </tr>
+      <tr class="fail-row">
+        <td>flash_attention_kernel (v1)</td>
+        <td class="num">31</td>
+        <td class="num" style="color:var(--red); font-weight:700;">384</td>
+        <td class="num">1,024</td>
+        <td class="num">0</td>
+        <td>Stack spill from O_local[64] + scores[32]</td>
+      </tr>
+      <tr class="highlight-row">
+        <td>flash_attention_v2_kernel</td>
+        <td class="num">32</td>
+        <td class="num" style="color:var(--accent2); font-weight:700;">0</td>
+        <td class="num">1,024</td>
+        <td class="num">0</td>
+        <td>Clean &mdash; scalar accumulators fit in registers</td>
+      </tr>
+      <tr class="highlight-row">
+        <td>flash_attention_v3_kernel</td>
+        <td class="num">40</td>
+        <td class="num" style="color:var(--accent2); font-weight:700;">0</td>
+        <td class="num">1,024</td>
+        <td class="num">0</td>
+        <td>+8 regs for multi-row bookkeeping</td>
+      </tr>
+      <tr>
+        <td>qk_kernel (naive)</td>
+        <td class="num">30</td>
+        <td class="num">0</td>
+        <td class="num">0</td>
+        <td class="num">0</td>
+        <td>Simple &mdash; no shared memory used</td>
+      </tr>
+      <tr>
+        <td>softmax_kernel (naive)</td>
+        <td class="num">32</td>
+        <td class="num">0</td>
+        <td class="num">0</td>
+        <td class="num">0</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>sv_kernel (naive)</td>
+        <td class="num">32</td>
+        <td class="num">0</td>
+        <td class="num">0</td>
+        <td class="num">0</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>qk_kernel_opt (optimized)</td>
+        <td class="num">33</td>
+        <td class="num">0</td>
+        <td class="num">1,024</td>
+        <td class="num">0</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>softmax_kernel_opt</td>
+        <td class="num">16</td>
+        <td class="num">0</td>
+        <td class="num">1,024</td>
+        <td class="num">0</td>
+        <td>Parallel reduction &mdash; fewer regs needed</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="callout callout-blue">
+    <strong>Key finding:</strong> The compiler kept register counts similar across all kernels (30&ndash;40). The difference between v1 and v2 is <strong>not</strong> register count &mdash; it&rsquo;s the <strong>384-byte stack spill</strong>. The <code class="inline-code">float O_local[64]</code> and <code class="inline-code">float scores[32]</code> arrays were too large for the compiler to keep in registers, so they were placed in local memory (stack), which resides off-chip in device DRAM accessed through L2 cache.
+    <br><br>
+    <span class="cite">Source: NVIDIA Technical Blog &mdash; "How to Improve CUDA Kernel Performance with Shared Memory Register Spilling": "register spills were placed in local memory, which resides off-chip in device global memory."</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- TAKEAWAYS -->
+<!-- ============================================================ -->
+<section class="slide" id="takeaways">
+  <h2>Key Takeaways</h2>
+
+  <div class="card" style="margin-bottom: 1rem;">
+    <h3>1. Map threads to output dimensions, not input iterations</h3>
+    <p>The optimized and v1 kernels failed because many threads computed the same result. The fix: each thread <strong>owns</strong> a unique subset of the output and cooperates on inputs via warp shuffle. This is the single most important design decision in the kernel.</p>
+  </div>
+
+  <div class="card" style="margin-bottom: 1rem;">
+    <h3>2. Stack spill matters more than register count</h3>
+    <p>v1 and v2 use nearly identical register counts (31 vs 32). The performance difference is the <strong>384-byte stack spill</strong> in v1 &mdash; invisible without <code class="inline-code">cuobjdump</code>. Per-thread arrays that exceed the register file are silently placed in local memory, turning register-speed accesses into DRAM-speed accesses.</p>
+  </div>
+
+  <div class="card" style="margin-bottom: 1rem;">
+    <h3>3. Share K/V tiles across query rows</h3>
+    <p>All query rows in the same (batch, head) read the same K and V. Packing multiple rows per block amortizes the global memory load cost. This gave a <strong>3.4&times; speedup</strong> (v2 &rarr; v3) with no algorithmic change.</p>
+  </div>
+
+  <div class="card" style="margin-bottom: 1rem;">
+    <h3>4. Flash Attention is a memory optimization, not a compute optimization</h3>
+    <p>At N=512, the N&times;N matrix fits in L2 and naive is simple. Flash wins at scale because it <strong>never allocates O(N&sup2;) memory</strong>. At N=16K, naive would need 8 GB for scores alone; Flash uses 32 MB total. The algorithm trades more compute (online softmax rescaling) for radically less memory.</p>
+  </div>
+
+  <div class="card">
+    <h3>5. Profile before and after &mdash; gut instinct fails</h3>
+    <p>The &ldquo;optimized&rdquo; kernel was <strong>15&times; slower</strong>. Flash v1 was <strong>75&times; slower</strong>. Both were written with reasonable intuitions (shared memory is fast, fused kernels are fast). Without benchmarks and <code class="inline-code">cuobjdump</code>, these regressions would have shipped as &ldquo;optimizations.&rdquo;</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- REFERENCES -->
+<!-- ============================================================ -->
+<section class="slide" id="refs">
+  <h2>References</h2>
+
+  <div class="card">
+    <h3>Paper</h3>
+    <ul style="padding-left: 1.5rem;">
+      <li>Dao, T., et al. &ldquo;FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness.&rdquo; NeurIPS 2022. <a href="https://arxiv.org/abs/2205.14135" style="color:var(--accent)">arXiv:2205.14135</a></li>
+    </ul>
+
+    <h3>NVIDIA Documentation</h3>
+    <ul style="padding-left: 1.5rem;">
+      <li><strong>CUDA C++ Programming Guide</strong>
+        <ul style="padding-left: 1.2rem;">
+          <li>&sect;H (Compute Capabilities): max 1,024 threads/block, 65,536 registers/SM, warp size = 32</li>
+          <li>&sect;B.15 (Warp Shuffle Functions): <code class="inline-code">__shfl_xor_sync</code> semantics</li>
+          <li>&sect;5.2 (Maximize Utilization): occupancy and latency hiding</li>
+          <li>&sect;5.3.2 (Local Memory): local memory resides in device memory, subject to same latency as global memory</li>
+        </ul>
+      </li>
+      <li><strong>NVIDIA Developer Blog</strong>
+        <ul style="padding-left: 1.2rem;">
+          <li>&ldquo;Using CUDA Warp-Level Primitives&rdquo; (2018): butterfly reduction pattern with <code class="inline-code">__shfl_xor_sync</code></li>
+          <li>&ldquo;How to Improve CUDA Kernel Performance with Shared Memory Register Spilling&rdquo;: stack spill &rarr; local memory &rarr; off-chip DRAM</li>
+        </ul>
+      </li>
+    </ul>
+
+    <h3>Tools</h3>
+    <ul style="padding-left: 1.5rem;">
+      <li><code class="inline-code">cuobjdump --dump-resource-usage</code> &mdash; register, stack, shared, local memory per kernel</li>
+      <li>PyTorch C++ Extensions with <code class="inline-code">CUDAExtension</code> + PyBind11</li>
+      <li>CUDA event timing via <code class="inline-code">torch.cuda.Event</code></li>
+    </ul>
+  </div>
+
+  <hr class="sep">
+
+  <p style="text-align: center; color: var(--muted);">
+    Shubham Saini &mdash; <a href="https://github.com/ShubhamSaini01" style="color:var(--accent)">github.com/ShubhamSaini01</a>
+  </p>
+</section>
+
+</body>
+</html>
